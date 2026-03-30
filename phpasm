@@ -1,0 +1,55 @@
+<?php
+declare(strict_types=1);
+
+require_once __DIR__ . '/src/bootstrap.php';
+
+use PhpAsm\Compiler;
+
+if ($argc < 3) {
+    fwrite(STDERR, "Usage: php phpasm <input.php> <output.asm> [modules_dir]\n");
+    exit(1);
+}
+
+$inputPath = $argv[1];
+$outputPath = $argv[2];
+$modulesDir = $argv[3] ?? (dirname($outputPath) . DIRECTORY_SEPARATOR . 'modules');
+
+if (!is_file($inputPath)) {
+    fwrite(STDERR, "Input file not found: {$inputPath}\n");
+    exit(1);
+}
+
+$source = file_get_contents($inputPath);
+if ($source === false) {
+    fwrite(STDERR, "Failed to read input file.\n");
+    exit(1);
+}
+
+try {
+    $compiler = new Compiler();
+    $result = $compiler->compileProject($inputPath);
+    $ok = file_put_contents($outputPath, $result->asm);
+    if ($ok === false) {
+        throw new RuntimeException("Failed to write output: {$outputPath}");
+    }
+    if (!is_dir($modulesDir)) {
+        if (!mkdir($modulesDir, 0777, true) && !is_dir($modulesDir)) {
+            throw new RuntimeException("Failed to create modules dir: {$modulesDir}");
+        }
+    }
+    foreach ($result->moduleAsm as $modulePath => $moduleAsm) {
+        $base = pathinfo($modulePath, PATHINFO_FILENAME);
+        $hash = substr(md5($modulePath), 0, 8);
+        $moduleOut = rtrim($modulesDir, "\\/") . DIRECTORY_SEPARATOR . "{$base}.{$hash}.asm";
+        $write = file_put_contents($moduleOut, $moduleAsm);
+        if ($write === false) {
+            throw new RuntimeException("Failed to write module asm: {$moduleOut}");
+        }
+    }
+    fwrite(STDOUT, "Generated: {$outputPath}\n");
+    fwrite(STDOUT, "Module artifacts: {$modulesDir}\n");
+    exit(0);
+} catch (Throwable $e) {
+    fwrite(STDERR, "Compile error: {$e->getMessage()}\n");
+    exit(1);
+}
